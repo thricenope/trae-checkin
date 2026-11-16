@@ -79,6 +79,22 @@
     animation: spin .8s linear infinite; display: inline-block; vertical-align: -3px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .toggle { cursor: pointer; user-select: none; }
+  .field { margin-top: 12px; }
+  .field label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  textarea, input[type="password"] {
+    width: 100%; padding: 10px 12px; border-radius: 10px;
+    background: #0d1117; color: var(--text); border: 1px solid var(--border);
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    resize: vertical;
+  }
+  textarea:focus, input[type="password"]:focus { outline: none; border-color: var(--accent); }
+  button.btn {
+    margin-top: 12px; padding: 9px 16px; border-radius: 10px; cursor: pointer;
+    background: #1f6feb; color: #fff; border: 1px solid #1f6feb; font-size: 13px;
+  }
+  button.btn:disabled { opacity: .55; cursor: default; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -107,16 +123,48 @@
 
   <main id="list"><div class="empty"><span class="spinner"></span> 正在读取签到状态</div></main>
 
+  <section class="card" id="addCard" hidden>
+    <div class="row toggle" id="addToggle">
+      <span class="name">＋ 添加账号</span>
+      <span class="sub" id="addState">展开</span>
+    </div>
+    <div id="addBody" hidden>
+      <div class="note" id="curAcc">现有账号：读取中…</div>
+
+      <div class="field">
+        <label>accounts.json 内容（整体覆盖，请包含所有账号）</label>
+        <textarea id="accJson" rows="7" spellcheck="false"
+          placeholder='[{ "name": "用户xxx", "token": "eyJ...", "device_id": "...", "user_id": "...", "region": "CN" }]'></textarea>
+      </div>
+
+      <div class="field">
+        <label>GitHub 令牌（classic PAT，勾选 repo；只存在内存，刷新即消失）</label>
+        <input id="ghPat" type="password" autocomplete="off" placeholder="ghp_..." />
+      </div>
+
+      <button class="btn" id="saveBtn">写入 Secret 并生效</button>
+      <div class="note" id="saveMsg"></div>
+      <div class="note">
+        令牌权限只用于本仓库的 Actions Secrets。写入后到
+        <a class="sub" id="runNow" href="#">Actions</a> 点 Run workflow 验证。
+      </div>
+    </div>
+  </section>
+
   <footer>
     <a class="btn" id="runLink" href="#" hidden>查看运行记录</a>
     <a class="btn" id="actionLink" href="#">手动触发签到</a>
   </footer>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/libsodium-wrappers@0.7.13/dist/bundles/libsodium-wrappers.js"></script>
 <script>
   const list = document.getElementById('list');
   const updated = document.getElementById('updated');
   const summary = document.getElementById('summary');
+  const owner = location.hostname.split('.')[0];
+  const repo = location.pathname.split('/')[1];
+  const onGithub = location.hostname.endsWith('github.io') && !!repo;
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -138,6 +186,13 @@
     updated.textContent = '更新于 ' + (data.updated_at || '未知');
     summary.hidden = false;
 
+    const curAcc = document.getElementById('curAcc');
+    if (curAcc) {
+      curAcc.textContent = accounts.length
+        ? '现有账号：' + accounts.map(a => a.name || a.user_id).join('、') + `（共 ${accounts.length} 个）`
+        : '现有账号：暂无';
+    }
+
     if (data.run_url) {
       const link = document.getElementById('runLink');
       link.href = data.run_url;
@@ -149,7 +204,6 @@
       list.appendChild(el('div', 'empty', '还没有账号数据，先在仓库里配置 TRAE_ACCOUNTS。'));
       return;
     }
-
     for (const a of accounts) {
       const card = el('div', 'card');
       const row = el('div', 'row');
@@ -194,6 +248,84 @@
       list.appendChild(el('div', 'empty', '还没有运行记录。点下面的「手动触发签到」，跑完刷新即可。'));
       updated.textContent = '暂无数据';
     }
+  }
+
+  // ---- 添加账号：直接把账号写入仓库 Secret ----
+  const addCard = document.getElementById('addCard');
+  const addBody = document.getElementById('addBody');
+  const addToggle = document.getElementById('addToggle');
+  const addState = document.getElementById('addState');
+  const saveBtn = document.getElementById('saveBtn');
+  const saveMsg = document.getElementById('saveMsg');
+
+  function setMsg(text, cls) {
+    saveMsg.textContent = text;
+    saveMsg.className = 'note ' + (cls || '');
+  }
+
+  if (onGithub) {
+    addCard.hidden = false;
+    document.getElementById('runNow').href =
+      `https://github.com/${owner}/${repo}/actions/workflows/checkin.yml`;
+
+    addToggle.addEventListener('click', () => {
+      const open = addBody.hidden;
+      addBody.hidden = !open;
+      addState.textContent = open ? '收起' : '展开';
+    });
+
+    saveBtn.addEventListener('click', async () => {
+      const pat = document.getElementById('ghPat').value.trim();
+      const raw = document.getElementById('accJson').value.trim();
+      if (!raw) return setMsg('先把 accounts.json 的内容粘进来', 'warn');
+      if (!pat) return setMsg('还需要填 GitHub 令牌', 'warn');
+
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (e) {
+        return setMsg('JSON 解析失败：' + e.message, 'fail');
+      }
+      if (!Array.isArray(parsed)) parsed = [parsed];
+      if (!parsed.length || parsed.some(a => !a || typeof a !== 'object' || !a.user_id)) {
+        return setMsg('格式不对：需要包含 user_id 的账号对象数组', 'fail');
+      }
+
+      saveBtn.disabled = true;
+      setMsg('正在写入…');
+      try {
+        await sodium.ready;
+        const headers = { Authorization: 'Bearer ' + pat, Accept: 'application/vnd.github+json' };
+        const kres = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/actions/secrets/public-key`,
+          { headers });
+        if (!kres.ok) throw new Error(`读取公钥失败 HTTP ${kres.status}（令牌权限不足或已失效）`);
+        const { key_id, key } = await kres.json();
+
+        const sealed = sodium.crypto_box_seal(
+          sodium.from_string(JSON.stringify(parsed)),
+          sodium.from_base64(key, sodium.base64_variants.ORIGINAL));
+
+        const res = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/actions/secrets/TRAE_ACCOUNTS`,
+          {
+            method: 'PUT',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              encrypted_value: sodium.to_base64(sealed, sodium.base64_variants.ORIGINAL),
+              key_id,
+            }),
+          });
+        if (!res.ok) throw new Error(`写入失败 HTTP ${res.status}（令牌需要 Secrets 写权限）`);
+
+        document.getElementById('ghPat').value = '';
+        setMsg(`已写入 ${parsed.length} 个账号，去 Actions 点 Run workflow 验证`, 'ok');
+      } catch (e) {
+        setMsg('失败：' + e.message, 'fail');
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
   }
 
   load();
