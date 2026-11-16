@@ -150,6 +150,20 @@ def main():
     if not accounts:
         sys.exit("没有解出任何账号，请确认客户端已登录。")
 
+    # 合并历史账号：客户端同一时间只存一个登录态，切号后重跑不会丢掉之前的号
+    old = []
+    if os.path.exists(OUT_FILE):
+        try:
+            with open(OUT_FILE, encoding="utf-8") as f:
+                old = [a for a in json.load(f) if isinstance(a, dict)]
+        except (ValueError, OSError):
+            old = []
+    merged = {(a.get("user_id") or a.get("name")): a for a in old}
+    added = len([a for a in accounts if a["user_id"] not in merged])
+    for a in accounts:
+        merged[a["user_id"]] = a
+    accounts = list(merged.values())
+
     with open(OUT_FILE, "w", encoding="utf-8") as f:
         json.dump(accounts, f, ensure_ascii=False, indent=2)
 
@@ -157,7 +171,7 @@ def main():
         print(json.dumps(accounts, ensure_ascii=False))
         return
 
-    print(f"已写入 {OUT_FILE}\n")
+    print(f"已写入 {OUT_FILE}（共 {len(accounts)} 个账号，本次新增 {added} 个）\n")
     for a in accounts:
         print(f"  名称：{a['name']}")
         print(f"  用户：{mask(a['user_id'])}")

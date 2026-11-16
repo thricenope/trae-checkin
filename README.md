@@ -18,8 +18,9 @@ python3 extract_creds.py
 脚本只读本机 `~/Library/Application Support/Trae CN/` 下的登录态文件，解密后写入
 `accounts.json`，终端里只显示打码信息，不会打印 token。
 
-多账号：把每个账号的 token 和设备号整理成数组即可（同一个客户端里切换账号登录，
-再跑一次脚本，把新账号的对象追加进去）：
+多账号：在客户端切换到另一个账号登录，再跑一次 `python3 extract_creds.py`。
+脚本会把新账号合并进 `accounts.json`（按 user_id 去重，已存在的号只更新 token），
+然后重新执行 `gh secret set TRAE_ACCOUNTS < accounts.json` 即可。
 
 ```json
 [
