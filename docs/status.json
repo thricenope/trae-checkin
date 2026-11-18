@@ -1,6 +1,6 @@
 {
-  "updated_at": "2026-11-17 15:46:07",
-  "run_url": "https://github.com/thricenope/trae-checkin/actions/runs/44041207614",
+  "updated_at": "2026-11-18 15:13:08",
+  "run_url": "https://github.com/thricenope/trae-checkin/actions/runs/44257124146",
   "accounts": [
     {
       "name": "用户3427721403",
@@ -8,7 +8,7 @@
       "ok": true,
       "checked_in": true,
       "credited": 200,
-      "balance": 7292,
+      "balance": 7442,
       "message": "今日已签到"
     }
   ]
